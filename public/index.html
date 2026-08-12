@@ -422,7 +422,9 @@
       page++;
       if (page > 200) break;
     }
-    return allEntries;
+    // Deduplicate by entry ID — ClickUp repeats entries once per matching task assignee
+    const seen = new Set();
+    return allEntries.filter(e => e.id && !seen.has(e.id) && seen.add(e.id));
   }
 
   function aggregateByList(entries90, entries30, listMap, pmUserIds) {
