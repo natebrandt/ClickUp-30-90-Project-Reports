@@ -360,9 +360,11 @@
     const totals=sorted.reduce((acc,r)=>{acc.ms90+=r.ms90;acc.ms30+=r.ms30;acc.pmMs90+=r.pmMs90;return acc;},{ms90:0,ms30:0,pmMs90:0});
     const sh=(col,label)=>{const arrow=_sortCol===col?(_sortDir===1?' ↑':' ↓'):'';return `<th class="num sort-btn" data-col="${col}">${label}${arrow}</th>`;};
     let html=`<table><thead><tr><th class="sort-btn" data-col="name">List Name</th><th class="sort-btn" data-col="spaceName">Space</th>${sh('ms90','Time // 90 Days')}${sh('ms30','Time // 30 Days')}${sh('pmMs90','PM Time // 90 Days')}</tr></thead><tbody>`;
+    const tid=$('teamId').value.trim();
     sorted.forEach(r=>{
       const t90=msToHHMM(r.ms90),t30=msToHHMM(r.ms30),pm90=msToHHMM(r.pmMs90);
-      html+=`<tr><td>${escHtml(r.name)}</td><td><span class="space-tag">${escHtml(r.spaceName)}</span></td><td class="num ${t90?'time-90':'dash'}">${t90||'—'}</td><td class="num ${t30?'time-30':'dash'}">${t30||'—'}</td><td class="num ${pm90?'pm-90':'dash'}">${pm90||'—'}</td></tr>`;
+      const cuUrl=`https://app.clickup.com/${tid}/v/l/${r.id}`;
+      html+=`<tr><td><a href="${cuUrl}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;border-bottom:1px solid #2a3348;" onmouseover="this.style.borderBottomColor='#7c6af7'" onmouseout="this.style.borderBottomColor='#2a3348'">${escHtml(r.name)}</a></td><td><span class="space-tag">${escHtml(r.spaceName)}</span></td><td class="num ${t90?'time-90':'dash'}">${t90||'—'}</td><td class="num ${t30?'time-30':'dash'}">${t30||'—'}</td><td class="num ${pm90?'pm-90':'dash'}">${pm90||'—'}</td></tr>`;
     });
     html+=`<tr class="totals-row"><td colspan="2">Total (${sorted.length} lists)</td><td class="num time-90">${msToHHMM(totals.ms90)||'—'}</td><td class="num time-30">${msToHHMM(totals.ms30)||'—'}</td><td class="num pm-90">${msToHHMM(totals.pmMs90)||'—'}</td></tr></tbody></table>`;
     $('tableContainer').innerHTML=html;
