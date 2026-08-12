@@ -343,7 +343,7 @@
       const listId=String(e.task_location?.list_id);
       if (!listId||listId==='null'||!map[listId]) return;
       const dur=Number(e.duration);
-      if (dur<=0) return; // skip running timers (negative duration) and zero-duration entries
+      if (dur<=0||!Number(e.end)) return; // skip running timers (end=0 means timer still active)
       map[listId].ms90+=dur;
       const uid=String(e.user?.id);
       if (pmSet.has(uid)){
@@ -355,7 +355,7 @@
       const listId=String(e.task_location?.list_id);
       if (!listId||listId==='null'||!map[listId]) return;
       const dur=Number(e.duration);
-      if (dur<=0) return;
+      if (dur<=0||!Number(e.end)) return;
       map[listId].ms30+=dur;
     });
     return Object.entries(map).map(([id,v])=>({id,...v,
