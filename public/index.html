@@ -240,7 +240,7 @@
 
   // All ClickUp API calls go through the Vercel serverless proxy.
   async function cuFetch(path) {
-    const res = await fetch(`/api/clickup${path}`);
+    const res = await fetch(`/api/clickup?path=${encodeURIComponent(path)}`);
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       throw new Error(`API error ${res.status}: ${body.err || body.error || res.statusText}`);
