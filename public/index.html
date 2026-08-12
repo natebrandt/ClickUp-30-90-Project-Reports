@@ -61,6 +61,13 @@
     #termLog .line.warn .msg { color:#fbbf24; }
     #termLog .line.err  .msg { color:#f87171; }
     #termLog .line.head .msg { color:#7c6af7; font-weight:600; }
+    .filter-bar { display:flex; gap:12px; align-items:center; margin-bottom:14px; font-size:12px; flex-wrap:wrap; }
+    .filter-bar label { color:#64748b; }
+    .filter-bar select { background:#161b27; border:1px solid #2a3348; border-radius:5px; color:#e2e8f0; font-size:12px; padding:5px 10px; outline:none; cursor:pointer; transition:border-color .15s; }
+    .filter-bar select:focus { border-color:#7c6af7; }
+    .filter-bar .clear-btn { background:none; border:none; color:#475569; cursor:pointer; font-size:12px; padding:4px 8px; border-radius:4px; }
+    .filter-bar .clear-btn:hover { color:#94a3b8; background:#1e2a3a; }
+    td.pct { text-align:right; font-variant-numeric:tabular-nums; font-family:'SF Mono','Fira Code',monospace; font-size:13px; color:#f59e0b; }
     .space-picker-list { display: flex; flex-direction: column; gap: 4px; }
     .space-picker-item { display: flex; align-items: center; gap: 8px; background: #0d0f14; border: 1px solid #2a3348; border-radius: 5px; padding: 7px 10px; cursor: pointer; font-size: 12px; transition: border-color .1s; }
     .space-picker-item:hover { border-color: #7c6af7; }
@@ -104,6 +111,7 @@
   </aside>
   <main class="main">
     <div id="metaBar" class="meta-bar" style="display:none"></div>
+    <div id="filterBar" style="display:none" class="filter-bar"></div>
     <div id="termLog"></div>
     <div class="table-wrap">
       <div id="tableContainer">
@@ -217,7 +225,7 @@
       const now=Date.now(), start90=now-90*24*60*60*1000, start30=now-30*24*60*60*1000;
       log('Fetching workspace members, lists, and PM group in parallel…');
       setStatus('<span class="spinner"></span>Loading members, lists, and PM group…');
-      const [listMap,allMemberIds,pmUserIds]=await Promise.all([
+      const [listMap,{ids:allMemberIds,nameById},pmUserIds]=await Promise.all([
         fetchAllLists(spaceIds), fetchAllMemberIds(teamId), fetchPMUserIds(teamId,pmGroup)
       ]);
       const listCount=Object.keys(listMap).length;
@@ -235,7 +243,7 @@
       const entries30=filtered90.filter(e=>Number(e.start)>=start30);
       log(`✓ ${filtered90.length.toLocaleString()} entries in 90-day window  |  ${entries30.length.toLocaleString()} in last 30 days`,'ok');
       log('Aggregating by list…');
-      const lists=aggregateByList(filtered90,entries30,listMap,pmUserIds);
+      const lists=aggregateByList(filtered90,entries30,listMap,pmUserIds,nameById);
       log(`✓ Aggregation complete — ${lists.length} lists`,'ok');
 
       const report={
@@ -282,7 +290,13 @@
     const data=await cuFetch('/team');
     const team=(data.teams||[]).find(t=>String(t.id)===String(teamId));
     if (!team) throw new Error(`Workspace ${teamId} not found.`);
-    return (team.members||[]).map(m=>String(m.user?.id??m.id)).filter(Boolean);
+    const nameById={};
+    const ids=(team.members||[]).map(m=>{
+      const id=String(m.user?.id??m.id);
+      nameById[id]=m.user?.username||m.user?.email||id;
+      return id;
+    }).filter(Boolean);
+    return {ids,nameById};
   }
 
   async function fetchAllLists(spaceIds) {
@@ -322,27 +336,36 @@
     return all;
   }
 
-  function aggregateByList(entries90,entries30,listMap,pmUserIds) {
+  function aggregateByList(entries90,entries30,listMap,pmUserIds,nameById={}) {
     const pmSet=new Set(pmUserIds);
-    const map=Object.fromEntries(Object.entries(listMap).map(([id,v])=>[id,{name:v.name,spaceName:v.spaceName,ms90:0,ms30:0,pmMs90:0}]));
+    const map=Object.fromEntries(Object.entries(listMap).map(([id,v])=>[id,{name:v.name,spaceName:v.spaceName,ms90:0,ms30:0,pmMs90:0,pmBreakdown:{}}]));
     entries90.forEach(e=>{
       const listId=String(e.task_location?.list_id);
       if (!listId||listId==='null'||!map[listId]) return;
       const dur=Number(e.duration)||0;
       map[listId].ms90+=dur;
-      if (pmSet.has(String(e.user?.id))) map[listId].pmMs90+=dur;
+      const uid=String(e.user?.id);
+      if (pmSet.has(uid)){
+        map[listId].pmMs90+=dur;
+        map[listId].pmBreakdown[uid]=(map[listId].pmBreakdown[uid]||0)+dur;
+      }
     });
     entries30.forEach(e=>{
       const listId=String(e.task_location?.list_id);
       if (!listId||listId==='null'||!map[listId]) return;
       map[listId].ms30+=(Number(e.duration)||0);
     });
-    return Object.entries(map).map(([id,v])=>({id,...v})).sort((a,b)=>a.name.localeCompare(b.name));
+    return Object.entries(map).map(([id,v])=>({id,...v,
+      pmPct: v.ms90>0 ? v.pmMs90/v.ms90 : 0,
+      pmContributors:Object.entries(v.pmBreakdown)
+        .sort((a,b)=>b[1]-a[1])
+        .map(([uid,ms])=>({name:nameById[uid]||uid,ms}))
+    })).sort((a,b)=>a.name.localeCompare(b.name));
   }
 
-  let _rows=[], _sortCol='name', _sortDir=1;
+  let _rows=[], _sortCol='name', _sortDir=1, _pmFilter='';
   function renderTable(data, cacheHit) {
-    _rows=data.lists||[]; _sortCol='name'; _sortDir=1;
+    _rows=data.lists||[]; _sortCol='name'; _sortDir=1; _pmFilter='';
     const {windows,meta}=data, fmt=ms=>new Date(ms).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
     const badge=cacheHit?'<span class="cache-badge cache-hit">Cached</span>':'<span class="cache-badge cache-miss">Live</span>';
     $('metaBar').style.display='flex';
@@ -353,20 +376,39 @@
       <span><strong>Members:</strong> ${meta.memberCount} | <strong>PM:</strong> ${meta.pmMemberCount}</span>
       <span><strong>Generated:</strong> ${new Date(data.generatedAt).toLocaleString()}</span>
       ${badge}`;
+    // Build PM filter dropdown from all unique contributor names
+    const allPMs=[...new Set(_rows.flatMap(r=>(r.pmContributors||[]).map(p=>p.name)))].sort();
+    const fb=$('filterBar');
+    fb.style.display='flex';
+    fb.innerHTML=`<label>Filter by PM:</label>
+      <select id="pmFilterSelect"><option value="">All PMs</option>${allPMs.map(n=>`<option value="${escHtml(n)}">${escHtml(n)}</option>`).join('')}</select>
+      <button class="clear-btn" id="clearPmFilter" style="display:none">× Clear</button>`;
+    $('pmFilterSelect').addEventListener('change',e=>{
+      _pmFilter=e.target.value;
+      $('clearPmFilter').style.display=_pmFilter?'inline':'none';
+      drawTable();
+    });
+    $('clearPmFilter').addEventListener('click',()=>{
+      _pmFilter=''; $('pmFilterSelect').value=''; $('clearPmFilter').style.display='none'; drawTable();
+    });
     drawTable();
   }
   function drawTable() {
-    const sorted=[..._rows].sort((a,b)=>{const av=a[_sortCol],bv=b[_sortCol];return typeof av==='string'?_sortDir*av.localeCompare(bv):_sortDir*(av-bv);});
+    const base=_pmFilter ? _rows.filter(r=>(r.pmContributors||[]).some(p=>p.name===_pmFilter)) : _rows;
+    const sorted=[...base].sort((a,b)=>{const av=a[_sortCol],bv=b[_sortCol];return typeof av==='string'?_sortDir*av.localeCompare(bv):_sortDir*(av-bv);});
     const totals=sorted.reduce((acc,r)=>{acc.ms90+=r.ms90;acc.ms30+=r.ms30;acc.pmMs90+=r.pmMs90;return acc;},{ms90:0,ms30:0,pmMs90:0});
+    const totalPct=totals.ms90>0?(totals.pmMs90/totals.ms90*100).toFixed(1)+'%':'—';
     const sh=(col,label)=>{const arrow=_sortCol===col?(_sortDir===1?' ↑':' ↓'):'';return `<th class="num sort-btn" data-col="${col}">${label}${arrow}</th>`;};
-    let html=`<table><thead><tr><th class="sort-btn" data-col="name">List Name</th><th class="sort-btn" data-col="spaceName">Space</th>${sh('ms90','Time // 90 Days')}${sh('ms30','Time // 30 Days')}${sh('pmMs90','PM Time // 90 Days')}</tr></thead><tbody>`;
+    let html=`<table><thead><tr><th class="sort-btn" data-col="name">List Name</th><th class="sort-btn" data-col="spaceName">Space</th>${sh('ms90','Time // 90 Days')}${sh('ms30','Time // 30 Days')}${sh('pmMs90','PM Time // 90 Days')}${sh('pmPct','PM %')}<th>PM Contributors</th></tr></thead><tbody>`;
     const tid=$('teamId').value.trim();
     sorted.forEach(r=>{
       const t90=msToHHMM(r.ms90),t30=msToHHMM(r.ms30),pm90=msToHHMM(r.pmMs90);
+      const pct=r.ms90>0?(r.pmMs90/r.ms90*100).toFixed(1)+'%':'—';
       const cuUrl=`https://app.clickup.com/${tid}/v/l/${r.id}`;
-      html+=`<tr><td><a href="${cuUrl}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;border-bottom:1px solid #2a3348;" onmouseover="this.style.borderBottomColor='#7c6af7'" onmouseout="this.style.borderBottomColor='#2a3348'">${escHtml(r.name)}</a></td><td><span class="space-tag">${escHtml(r.spaceName)}</span></td><td class="num ${t90?'time-90':'dash'}">${t90||'—'}</td><td class="num ${t30?'time-30':'dash'}">${t30||'—'}</td><td class="num ${pm90?'pm-90':'dash'}">${pm90||'—'}</td></tr>`;
+      const contrib=(r.pmContributors||[]).map(p=>`${escHtml(p.name)} (${msToHHMM(p.ms)||'—'})`).join('<br>')||'—';
+      html+=`<tr><td><a href="${cuUrl}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;border-bottom:1px solid #2a3348;" onmouseover="this.style.borderBottomColor='#7c6af7'" onmouseout="this.style.borderBottomColor='#2a3348'">${escHtml(r.name)}</a></td><td><span class="space-tag">${escHtml(r.spaceName)}</span></td><td class="num ${t90?'time-90':'dash'}">${t90||'—'}</td><td class="num ${t30?'time-30':'dash'}">${t30||'—'}</td><td class="num ${pm90?'pm-90':'dash'}">${pm90||'—'}</td><td class="pct">${pct}</td><td style="font-size:11px;color:#64748b;line-height:1.8">${contrib}</td></tr>`;
     });
-    html+=`<tr class="totals-row"><td colspan="2">Total (${sorted.length} lists)</td><td class="num time-90">${msToHHMM(totals.ms90)||'—'}</td><td class="num time-30">${msToHHMM(totals.ms30)||'—'}</td><td class="num pm-90">${msToHHMM(totals.pmMs90)||'—'}</td></tr></tbody></table>`;
+    html+=`<tr class="totals-row"><td colspan="2">Total (${sorted.length} lists)</td><td class="num time-90">${msToHHMM(totals.ms90)||'—'}</td><td class="num time-30">${msToHHMM(totals.ms30)||'—'}</td><td class="num pm-90">${msToHHMM(totals.pmMs90)||'—'}</td><td class="pct" style="color:#fbbf24">${totalPct}</td><td></td></tr></tbody></table>`;
     $('tableContainer').innerHTML=html;
     $('tableContainer').querySelectorAll('[data-col]').forEach(el=>{
       el.style.cursor='pointer';
