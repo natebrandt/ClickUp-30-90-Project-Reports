@@ -422,7 +422,7 @@
     sorted.forEach(r=>{
       const t90=msToHHMM(r.ms90),t30=msToHHMM(r.ms30),pm90=msToHHMM(r.pmMs90);
       const pct=r.ms90>0?(r.pmMs90/r.ms90*100).toFixed(1)+'%':'—';
-      const cuUrl=`https://app.clickup.com/${tid}/v/l/${r.id}`;
+      const cuUrl=`https://app.clickup.com/${tid}/v/li/${r.id}`;
       const contrib=(r.pmContributors||[]).map(p=>`${escHtml(p.name)} (${msToHHMM(p.ms)||'—'})`).join('<br>')||'—';
       const hasEntries=(_entryMap[r.id]||[]).length>0;
       html+=`<tr>
