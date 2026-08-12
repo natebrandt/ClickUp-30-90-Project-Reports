@@ -68,6 +68,17 @@
     .filter-bar .clear-btn { background:none; border:none; color:#475569; cursor:pointer; font-size:12px; padding:4px 8px; border-radius:4px; }
     .filter-bar .clear-btn:hover { color:#94a3b8; background:#1e2a3a; }
     td.pct { text-align:right; font-variant-numeric:tabular-nums; font-family:'SF Mono','Fira Code',monospace; font-size:13px; color:#f59e0b; }
+    .tog { background:none; border:none; color:#334155; cursor:pointer; font-size:11px; padding:2px 5px; border-radius:3px; transition:color .1s; }
+    .tog:hover { color:#7c6af7; }
+    .detail-row { background:#080a0e; }
+    .detail-row td { padding:0; }
+    .detail-inner { padding:10px 14px 10px 40px; border-top:1px solid #1a2030; }
+    .detail-inner table { width:100%; border-collapse:collapse; font-size:11px; }
+    .detail-inner thead th { color:#475569; font-weight:600; text-transform:uppercase; letter-spacing:.05em; padding:4px 8px; text-align:left; border-bottom:1px solid #1e2535; }
+    .detail-inner thead th.r { text-align:right; }
+    .detail-inner tbody td { padding:4px 8px; color:#64748b; border-bottom:1px solid #111827; }
+    .detail-inner tbody td.r { text-align:right; font-family:monospace; color:#94a3b8; }
+    .detail-inner tbody tr:last-child td { border-bottom:none; }
     .space-picker-list { display: flex; flex-direction: column; gap: 4px; }
     .space-picker-item { display: flex; align-items: center; gap: 8px; background: #0d0f14; border: 1px solid #2a3348; border-radius: 5px; padding: 7px 10px; cursor: pointer; font-size: 12px; transition: border-color .1s; }
     .space-picker-item:hover { border-color: #7c6af7; }
@@ -339,6 +350,7 @@
   function aggregateByList(entries90,entries30,listMap,pmUserIds,nameById={}) {
     const pmSet=new Set(pmUserIds);
     const map=Object.fromEntries(Object.entries(listMap).map(([id,v])=>[id,{name:v.name,spaceName:v.spaceName,ms90:0,ms30:0,pmMs90:0,pmBreakdown:{}}]));
+    _entryMap={}; // reset raw entry store
     entries90.forEach(e=>{
       const listId=String(e.task_location?.list_id);
       if (!listId||listId==='null'||!map[listId]) return;
@@ -350,6 +362,9 @@
         map[listId].pmMs90+=dur;
         map[listId].pmBreakdown[uid]=(map[listId].pmBreakdown[uid]||0)+dur;
       }
+      // store raw entry for expand panel
+      if (!_entryMap[listId]) _entryMap[listId]=[];
+      _entryMap[listId].push({userName:nameById[uid]||uid, taskName:e.task?.name||'', start:Number(e.start), duration:dur, isPM:pmSet.has(uid)});
     });
     entries30.forEach(e=>{
       const listId=String(e.task_location?.list_id);
@@ -366,9 +381,9 @@
     })).sort((a,b)=>a.name.localeCompare(b.name));
   }
 
-  let _rows=[], _sortCol='name', _sortDir=1, _pmFilter='';
+  let _rows=[], _sortCol='name', _sortDir=1, _pmFilter='', _entryMap={}, _expanded=new Set();
   function renderTable(data, cacheHit) {
-    _rows=data.lists||[]; _sortCol='name'; _sortDir=1; _pmFilter='';
+    _rows=data.lists||[]; _sortCol='name'; _sortDir=1; _pmFilter=''; _expanded=new Set();
     const {windows,meta}=data, fmt=ms=>new Date(ms).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
     const badge=cacheHit?'<span class="cache-badge cache-hit">Cached</span>':'<span class="cache-badge cache-miss">Live</span>';
     $('metaBar').style.display='flex';
@@ -402,21 +417,62 @@
     const totals=sorted.reduce((acc,r)=>{acc.ms90+=r.ms90;acc.ms30+=r.ms30;acc.pmMs90+=r.pmMs90;return acc;},{ms90:0,ms30:0,pmMs90:0});
     const totalPct=totals.ms90>0?(totals.pmMs90/totals.ms90*100).toFixed(1)+'%':'—';
     const sh=(col,label)=>{const arrow=_sortCol===col?(_sortDir===1?' ↑':' ↓'):'';return `<th class="num sort-btn" data-col="${col}">${label}${arrow}</th>`;};
-    let html=`<table><thead><tr><th class="sort-btn" data-col="name">List Name</th><th class="sort-btn" data-col="spaceName">Space</th>${sh('ms90','Time // 90 Days')}${sh('ms30','Time // 30 Days')}${sh('pmMs90','PM Time // 90 Days')}${sh('pmPct','PM %')}<th>PM Contributors</th></tr></thead><tbody>`;
+    let html=`<table><thead><tr><th style="width:28px"></th><th class="sort-btn" data-col="name">List Name</th><th class="sort-btn" data-col="spaceName">Space</th>${sh('ms90','Time // 90 Days')}${sh('ms30','Time // 30 Days')}${sh('pmMs90','PM Time // 90 Days')}${sh('pmPct','PM %')}<th>PM Contributors</th></tr></thead><tbody>`;
     const tid=$('teamId').value.trim();
     sorted.forEach(r=>{
       const t90=msToHHMM(r.ms90),t30=msToHHMM(r.ms30),pm90=msToHHMM(r.pmMs90);
       const pct=r.ms90>0?(r.pmMs90/r.ms90*100).toFixed(1)+'%':'—';
       const cuUrl=`https://app.clickup.com/${tid}/v/l/${r.id}`;
       const contrib=(r.pmContributors||[]).map(p=>`${escHtml(p.name)} (${msToHHMM(p.ms)||'—'})`).join('<br>')||'—';
-      html+=`<tr><td><a href="${cuUrl}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;border-bottom:1px solid #2a3348;" onmouseover="this.style.borderBottomColor='#7c6af7'" onmouseout="this.style.borderBottomColor='#2a3348'">${escHtml(r.name)}</a></td><td><span class="space-tag">${escHtml(r.spaceName)}</span></td><td class="num ${t90?'time-90':'dash'}">${t90||'—'}</td><td class="num ${t30?'time-30':'dash'}">${t30||'—'}</td><td class="num ${pm90?'pm-90':'dash'}">${pm90||'—'}</td><td class="pct">${pct}</td><td style="font-size:11px;color:#64748b;line-height:1.8">${contrib}</td></tr>`;
+      const hasEntries=(_entryMap[r.id]||[]).length>0;
+      html+=`<tr>
+        <td><button class="tog" data-toggle="${r.id}" title="${hasEntries?'Show raw entries':'Load with Force Refresh to see entries'}">▶</button></td>
+        <td><a href="${cuUrl}" target="_blank" rel="noopener" style="color:inherit;text-decoration:none;border-bottom:1px solid #2a3348;" onmouseover="this.style.borderBottomColor='#7c6af7'" onmouseout="this.style.borderBottomColor='#2a3348'">${escHtml(r.name)}</a></td>
+        <td><span class="space-tag">${escHtml(r.spaceName)}</span></td>
+        <td class="num ${t90?'time-90':'dash'}">${t90||'—'}</td>
+        <td class="num ${t30?'time-30':'dash'}">${t30||'—'}</td>
+        <td class="num ${pm90?'pm-90':'dash'}">${pm90||'—'}</td>
+        <td class="pct">${pct}</td>
+        <td style="font-size:11px;color:#64748b;line-height:1.8">${contrib}</td>
+      </tr>
+      <tr class="detail-row" id="detail-${r.id}" style="display:none"><td colspan="8"><div class="detail-inner" id="detail-inner-${r.id}"></div></td></tr>`;
     });
-    html+=`<tr class="totals-row"><td colspan="2">Total (${sorted.length} lists)</td><td class="num time-90">${msToHHMM(totals.ms90)||'—'}</td><td class="num time-30">${msToHHMM(totals.ms30)||'—'}</td><td class="num pm-90">${msToHHMM(totals.pmMs90)||'—'}</td><td class="pct" style="color:#fbbf24">${totalPct}</td><td></td></tr></tbody></table>`;
+    html+=`<tr class="totals-row"><td></td><td colspan="2">Total (${sorted.length} lists)</td><td class="num time-90">${msToHHMM(totals.ms90)||'—'}</td><td class="num time-30">${msToHHMM(totals.ms30)||'—'}</td><td class="num pm-90">${msToHHMM(totals.pmMs90)||'—'}</td><td class="pct" style="color:#fbbf24">${totalPct}</td><td></td></tr></tbody></table>`;
     $('tableContainer').innerHTML=html;
     $('tableContainer').querySelectorAll('[data-col]').forEach(el=>{
       el.style.cursor='pointer';
       el.addEventListener('click',()=>{const col=el.dataset.col;if(_sortCol===col)_sortDir*=-1;else{_sortCol=col;_sortDir=(col==='name'||col==='spaceName')?1:-1;}drawTable();});
     });
+    $('tableContainer').querySelectorAll('[data-toggle]').forEach(btn=>{
+      btn.addEventListener('click',()=>toggleDetail(btn.dataset.toggle));
+    });
+  }
+
+  function toggleDetail(listId) {
+    const detail=$(`detail-${listId}`), btn=document.querySelector(`[data-toggle="${listId}"]`);
+    if (!detail) return;
+    const open=detail.style.display!=='none';
+    detail.style.display=open?'none':'table-row';
+    btn.textContent=open?'▶':'▼';
+    if (!open && !detail.querySelector('table,em')) buildDetailPanel(listId);
+  }
+
+  function buildDetailPanel(listId) {
+    const inner=$(`detail-inner-${listId}`);
+    if (!inner) return;
+    const entries=(_entryMap[listId]||[]).sort((a,b)=>b.start-a.start);
+    if (!entries.length) {
+      inner.innerHTML='<em style="color:#475569;font-size:11px">No raw entries available — run a Force Refresh to populate entry details.</em>';
+      return;
+    }
+    let html=`<table><thead><tr><th>User</th><th>Task</th><th>Date</th><th class="r">Duration</th></tr></thead><tbody>`;
+    entries.forEach(e=>{
+      const date=new Date(e.start).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+      const pmMark=e.isPM?` <span style="color:#4ade80;font-size:10px">● PM</span>`:'';
+      html+=`<tr><td>${escHtml(e.userName)}${pmMark}</td><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(e.taskName)||'<em style="color:#334155">no task</em>'}</td><td>${date}</td><td class="r">${msToHHMM(e.duration)||'—'}</td></tr>`;
+    });
+    html+=`</tbody></table><div style="font-size:10px;color:#334155;margin-top:6px">${entries.length} entries</div>`;
+    inner.innerHTML=html;
   }
 </script>
 </body>
