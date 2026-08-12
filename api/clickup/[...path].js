@@ -8,10 +8,9 @@ export default async function handler(req, res) {
   const { path: pathParts, ...queryParams } = req.query;
   const path = '/' + (Array.isArray(pathParts) ? pathParts.join('/') : pathParts ?? '');
 
-  // Restrict to only the ClickUp API paths this app actually uses
-  const ALLOWED_PREFIXES = ['/team', '/space/', '/folder/', '/group', '/list/'];
-  if (!ALLOWED_PREFIXES.some(p => path.startsWith(p))) {
-    return res.status(403).json({ error: 'Path not allowed.' });
+  // Prevent path traversal; token secrecy is the real protection here
+  if (!path.startsWith('/') || path.includes('..')) {
+    return res.status(400).json({ error: 'Invalid path.' });
   }
 
   const qs = new URLSearchParams(queryParams).toString();
