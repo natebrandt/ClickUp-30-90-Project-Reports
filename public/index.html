@@ -52,6 +52,15 @@
     .cache-hit  { background: #14532d; color: #4ade80; }
     .cache-miss { background: #1e1b4b; color: #a78bfa; }
     .sort-btn { cursor: pointer; user-select: none; } .sort-btn:hover { color: #e2e8f0; }
+    #termLog { display:none; font-family:'SF Mono','Fira Code',monospace; font-size:12px; background:#0a0c10; border:1px solid #2a3348; border-radius:8px; padding:16px; height:320px; overflow-y:auto; margin-bottom:20px; }
+    #termLog .line { line-height:1.7; white-space:pre-wrap; word-break:break-all; }
+    #termLog .line .ts { color:#334155; margin-right:8px; user-select:none; }
+    #termLog .line.ok   .msg { color:#4ade80; }
+    #termLog .line.info .msg { color:#94a3b8; }
+    #termLog .line.dim  .msg { color:#475569; }
+    #termLog .line.warn .msg { color:#fbbf24; }
+    #termLog .line.err  .msg { color:#f87171; }
+    #termLog .line.head .msg { color:#7c6af7; font-weight:600; }
     .space-picker-list { display: flex; flex-direction: column; gap: 4px; }
     .space-picker-item { display: flex; align-items: center; gap: 8px; background: #0d0f14; border: 1px solid #2a3348; border-radius: 5px; padding: 7px 10px; cursor: pointer; font-size: 12px; transition: border-color .1s; }
     .space-picker-item:hover { border-color: #7c6af7; }
@@ -90,11 +99,12 @@
     <button class="btn btn-ghost" id="forceBtn" style="display:none">↺ Force Refresh Cache</button>
     <div id="status"></div>
     <div style="font-size:11px; color:#334155; line-height:1.6; margin-top:auto">
-      Results are cached server-side for 2 hours. The ClickUp API token is stored in Vercel — it never reaches the browser.
+      First load fetches live data and caches it for 2 hours. The ClickUp API token is stored in Vercel — it never reaches the browser.
     </div>
   </aside>
   <main class="main">
     <div id="metaBar" class="meta-bar" style="display:none"></div>
+    <div id="termLog"></div>
     <div class="table-wrap">
       <div id="tableContainer">
         <div class="empty">Configure settings and click <strong>Run Report</strong> to load data.</div>
@@ -105,22 +115,38 @@
 <script>
   const $ = id => document.getElementById(id);
   ['teamId','spaceIds','pmGroupName'].forEach(k => {
-    const el = $(k), saved = localStorage.getItem('cu_'+k);
-    if (saved) el.value = saved;
-    el.addEventListener('input', () => localStorage.setItem('cu_'+k, el.value));
+    const el=$(k), saved=localStorage.getItem('cu_'+k);
+    if (saved) el.value=saved;
+    el.addEventListener('input',()=>localStorage.setItem('cu_'+k,el.value));
   });
+
   function msToHHMM(ms) {
-    if (!ms || ms <= 0) return null;
-    const m = Math.floor(Math.abs(ms)/60000);
+    if (!ms||ms<=0) return null;
+    const m=Math.floor(Math.abs(ms)/60000);
     return `${Math.floor(m/60)}:${String(m%60).padStart(2,'0')}`;
   }
-  function setStatus(msg, type='') { const el=$('status'); el.className=type; el.innerHTML=msg; }
+  function setStatus(msg,type='') { const el=$('status'); el.className=type; el.innerHTML=msg; }
   function escHtml(s) { return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+  const _logEl = () => $('termLog');
+  function logClear() { const el=_logEl(); el.innerHTML=''; el.style.display='block'; }
+  function log(msg, level='info') {
+    const el=_logEl();
+    const ts=new Date().toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    const line=document.createElement('div');
+    line.className=`line ${level}`;
+    line.innerHTML=`<span class="ts">[${ts}]</span><span class="msg">${escHtml(msg)}</span>`;
+    el.appendChild(line);
+    el.scrollTop=el.scrollHeight;
+  }
+
+  // All ClickUp API calls go through the server-side proxy (token never in browser).
   async function cuFetch(path) {
-    const res = await fetch(`/api/clickup?path=${encodeURIComponent(path)}`);
+    const res=await fetch(`/api/clickup?path=${encodeURIComponent(path)}`);
     if (!res.ok) { const b=await res.json().catch(()=>({})); throw new Error(`API error ${res.status}: ${b.err||b.error||res.statusText}`); }
     return res.json();
   }
+
   $('detectBtn').addEventListener('click', async () => {
     $('detectBtn').disabled=true; setStatus('<span class="spinner"></span>Detecting…');
     try {
@@ -130,6 +156,7 @@
       else setStatus('Multiple workspaces — enter ID manually: '+teams.map(t=>`${t.name} (${t.id})`).join(', '));
     } catch(e) { setStatus(e.message,'error'); } finally { $('detectBtn').disabled=false; }
   });
+
   $('browseBtn').addEventListener('click', async () => {
     const teamId=$('teamId').value.trim();
     if (!teamId) { setStatus('Enter your Workspace ID first.','error'); return; }
@@ -139,7 +166,7 @@
       if (!spaces.length) throw new Error('No spaces found.');
       const cur=new Set($('spaceIds').value.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean));
       let html='<div class="space-picker-list">';
-      spaces.forEach(s=>{ html+=`<label class="space-picker-item"><input type="checkbox" value="${s.id}" ${cur.has(String(s.id))?'checked':''}/><span class="sp-name">${escHtml(s.name)}</span><span class="sp-id">${s.id}</span></label>`; });
+      spaces.forEach(s=>{html+=`<label class="space-picker-item"><input type="checkbox" value="${s.id}" ${cur.has(String(s.id))?'checked':''}/><span class="sp-name">${escHtml(s.name)}</span><span class="sp-id">${s.id}</span></label>`;});
       html+='</div><button class="btn btn-secondary space-picker-apply" id="applySpaces">Apply selection</button>';
       const picker=$('spacePicker'); picker.innerHTML=html; picker.style.display='block'; setStatus('');
       $('applySpaces').addEventListener('click',()=>{
@@ -149,6 +176,7 @@
       });
     } catch(e) { setStatus(e.message,'error'); } finally { $('browseBtn').disabled=false; }
   });
+
   async function fetchReport(force=false) {
     const teamId=$('teamId').value.trim(), spaceRaw=$('spaceIds').value.trim(), pmGroup=$('pmGroupName').value.trim();
     if (!teamId)   { setStatus('Workspace ID is required.','error'); return; }
@@ -156,23 +184,154 @@
     const spaceIds=spaceRaw.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean);
     $('runBtn').disabled=$('forceBtn').disabled=true;
     $('metaBar').style.display='none';
-    $('tableContainer').innerHTML='<div class="empty"><span class="spinner"></span>Loading…</div>';
-    setStatus(force?'<span class="spinner"></span>Force-refreshing cache…':'<span class="spinner"></span>Loading report…');
+    $('tableContainer').innerHTML='';
+    logClear();
+    log('Starting report…','head');
+
+    const cacheParams=new URLSearchParams({teamId, spaceIds:spaceIds.join(','), pmGroup});
+
+    // Check server-side cache first (unless force refresh)
+    if (!force) {
+      try {
+        setStatus('<span class="spinner"></span>Checking cache…');
+        log('Checking server cache…');
+        const cr=await fetch(`/api/report?${cacheParams}`);
+        const cd=await cr.json();
+        if (cd.cached !== false) {
+          log('Cache hit — rendering result','ok');
+          renderTable(cd, cr.headers.get('X-Cache')==='HIT');
+          $('forceBtn').style.display='block';
+          setStatus('✓ Loaded from cache','success');
+          $('runBtn').disabled=$('forceBtn').disabled=false;
+          _logEl().style.display='none';
+          return;
+        }
+        log('Cache miss — fetching live data','warn');
+      } catch(_) { log('Cache unavailable — fetching live data','warn'); }
+    } else {
+      log('Force refresh — skipping cache','warn');
+    }
+
+    // Cache miss — do full live fetch client-side
     try {
-      const params=new URLSearchParams({teamId, spaceIds:spaceIds.join(','), pmGroup});
-      if (force) params.set('force','true');
-      const res=await fetch(`/api/report?${params}`), data=await res.json();
-      if (!res.ok) throw new Error(data.error||res.statusText);
-      renderTable(data, res.headers.get('X-Cache')==='HIT');
+      const now=Date.now(), start90=now-90*24*60*60*1000, start30=now-30*24*60*60*1000;
+      log('Fetching workspace members, lists, and PM group in parallel…');
+      setStatus('<span class="spinner"></span>Loading members, lists, and PM group…');
+      const [listMap,allMemberIds,pmUserIds]=await Promise.all([
+        fetchAllLists(spaceIds), fetchAllMemberIds(teamId), fetchPMUserIds(teamId,pmGroup)
+      ]);
+      const listCount=Object.keys(listMap).length;
+      if (!listCount) throw new Error('No lists found in the configured spaces.');
+      log(`✓ ${listCount} lists found across ${spaceIds.length} space(s)`,'ok');
+      log(`✓ ${allMemberIds.length} workspace members  |  ${pmUserIds.length} PM members`,'ok');
+      log(`Fetching time entries for ${allMemberIds.length} members (90-day window)…`);
+      setStatus(`<span class="spinner"></span>Fetching time entries…`);
+
+      const entries90=await fetchTimeEntries(teamId,allMemberIds,start90,now);
+      const entries30=entries90.filter(e=>Number(e.start)>=start30);
+      log(`✓ ${entries90.length.toLocaleString()} unique entries fetched  |  ${entries30.length.toLocaleString()} in last 30 days`,'ok');
+      log('Aggregating by list…');
+      const lists=aggregateByList(entries90,entries30,listMap,pmUserIds);
+      log(`✓ Aggregation complete — ${lists.length} lists`,'ok');
+
+      const report={
+        generatedAt:new Date().toISOString(),
+        cached:true,
+        windows:{start90,start30,end:now},
+        meta:{totalEntries:entries90.length, memberCount:allMemberIds.length, pmMemberCount:pmUserIds.length},
+        lists
+      };
+
+      log('Rendering table…','dim');
+      renderTable(report, false);
       $('forceBtn').style.display='block';
+      log('Saving result to server cache…','dim');
+
+      // Write result to server cache asynchronously
+      fetch(`/api/report?${cacheParams}`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(report)
+      }).then(()=>log('✓ Cached — next load will be instant','ok')).catch(()=>log('Cache write failed (non-critical)','warn'));
+
       setStatus('✓ Report loaded','success');
+      setTimeout(()=>{ _logEl().style.display='none'; }, 3000);
     } catch(e) {
+      log(`Error: ${e.message}`,'err');
       $('tableContainer').innerHTML=`<div class="empty" style="color:#f87171">${escHtml(e.message)}</div>`;
       setStatus(e.message,'error');
     } finally { $('runBtn').disabled=$('forceBtn').disabled=false; }
   }
+
   $('runBtn').addEventListener('click',()=>fetchReport(false));
   $('forceBtn').addEventListener('click',()=>fetchReport(true));
+
+  async function fetchPMUserIds(teamId,groupName) {
+    if (!groupName) return [];
+    const data=await cuFetch(`/group?team_id=${teamId}`);
+    const match=(data.groups||[]).find(g=>g.name===groupName||(g.alias&&g.alias.replace(/^@/,'')===groupName.replace(/^@/,'')));
+    if (!match) return [];
+    return (match.members||[]).map(m=>String(m.user?.id??m.id));
+  }
+
+  async function fetchAllMemberIds(teamId) {
+    const data=await cuFetch('/team');
+    const team=(data.teams||[]).find(t=>String(t.id)===String(teamId));
+    if (!team) throw new Error(`Workspace ${teamId} not found.`);
+    return (team.members||[]).map(m=>String(m.user?.id??m.id)).filter(Boolean);
+  }
+
+  async function fetchAllLists(spaceIds) {
+    const map={};
+    await Promise.all(spaceIds.map(async spaceId=>{
+      let spaceName=spaceId;
+      try { spaceName=(await cuFetch(`/space/${spaceId}`)).name||spaceId; } catch(_){}
+      const fl=await cuFetch(`/space/${spaceId}/list?archived=false`);
+      (fl.lists||[]).forEach(l=>{map[String(l.id)]={name:l.name,spaceName};});
+      const fd=await cuFetch(`/space/${spaceId}/folder?archived=false`);
+      await Promise.all((fd.folders||[]).map(async folder=>{
+        const fl2=await cuFetch(`/folder/${folder.id}/list?archived=false`);
+        (fl2.lists||[]).forEach(l=>{map[String(l.id)]={name:l.name,spaceName};});
+      }));
+    }));
+    return map;
+  }
+
+  async function fetchTimeEntries(teamId,memberIds,startMs,endMs) {
+    const all=[]; let page=0;
+    while(true) {
+      const params=new URLSearchParams({start_date:String(Math.floor(startMs)),end_date:String(Math.floor(endMs)),include_location_names:'true',assignee:memberIds.join(','),page:String(page)});
+      const data=await cuFetch(`/team/${teamId}/time_entries?${params}`);
+      const entries=data.data||[];
+      all.push(...entries);
+      if (page===0||page%5===0) log(`  Page ${page+1} — ${all.length.toLocaleString()} entries so far…`,'dim');
+      if (entries.length<50) break;
+      page++; if (page>200) break;
+    }
+    const seen=new Set();
+    const deduped=all.filter(e=>e.id&&!seen.has(e.id)&&seen.add(e.id));
+    if (all.length!==deduped.length) log(`  Removed ${(all.length-deduped.length).toLocaleString()} duplicate entries`,'dim');
+    return deduped;
+  }
+
+  function aggregateByList(entries90,entries30,listMap,pmUserIds) {
+    const pmSet=new Set(pmUserIds);
+    const map=Object.fromEntries(Object.entries(listMap).map(([id,v])=>[id,{name:v.name,spaceName:v.spaceName,ms90:0,ms30:0,pmMs90:0}]));
+    entries90.forEach(e=>{
+      const listId=String(e.task_location?.list_id);
+      if (!listId||listId==='null'||!map[listId]) return;
+      const dur=Number(e.duration)||0;
+      map[listId].ms90+=dur;
+      if (pmSet.has(String(e.user?.id))) map[listId].pmMs90+=dur;
+    });
+    entries30.forEach(e=>{
+      const listId=String(e.task_location?.list_id);
+      if (!listId||listId==='null'||!map[listId]) return;
+      map[listId].ms30+=(Number(e.duration)||0);
+    });
+    return Object.entries(map).map(([id,v])=>({id,...v})).sort((a,b)=>a.name.localeCompare(b.name));
+  }
+
   let _rows=[], _sortCol='name', _sortDir=1;
   function renderTable(data, cacheHit) {
     _rows=data.lists||[]; _sortCol='name'; _sortDir=1;
@@ -189,29 +348,19 @@
     drawTable();
   }
   function drawTable() {
-    const sorted=[..._rows].sort((a,b)=>{ const av=a[_sortCol],bv=b[_sortCol]; return typeof av==='string'?_sortDir*av.localeCompare(bv):_sortDir*(av-bv); });
-    const totals=sorted.reduce((acc,r)=>{ acc.ms90+=r.ms90; acc.ms30+=r.ms30; acc.pmMs90+=r.pmMs90; return acc; },{ms90:0,ms30:0,pmMs90:0});
-    const sh=(col,label)=>{ const arrow=_sortCol===col?(_sortDir===1?' ↑':' ↓'):''; return `<th class="num sort-btn" data-col="${col}">${label}${arrow}</th>`; };
-    let html=`<table><thead><tr>
-      <th class="sort-btn" data-col="name">List Name</th>
-      <th class="sort-btn" data-col="spaceName">Space</th>
-      ${sh('ms90','Time // 90 Days')}${sh('ms30','Time // 30 Days')}${sh('pmMs90','PM Time // 90 Days')}
-    </tr></thead><tbody>`;
+    const sorted=[..._rows].sort((a,b)=>{const av=a[_sortCol],bv=b[_sortCol];return typeof av==='string'?_sortDir*av.localeCompare(bv):_sortDir*(av-bv);});
+    const totals=sorted.reduce((acc,r)=>{acc.ms90+=r.ms90;acc.ms30+=r.ms30;acc.pmMs90+=r.pmMs90;return acc;},{ms90:0,ms30:0,pmMs90:0});
+    const sh=(col,label)=>{const arrow=_sortCol===col?(_sortDir===1?' ↑':' ↓'):'';return `<th class="num sort-btn" data-col="${col}">${label}${arrow}</th>`;};
+    let html=`<table><thead><tr><th class="sort-btn" data-col="name">List Name</th><th class="sort-btn" data-col="spaceName">Space</th>${sh('ms90','Time // 90 Days')}${sh('ms30','Time // 30 Days')}${sh('pmMs90','PM Time // 90 Days')}</tr></thead><tbody>`;
     sorted.forEach(r=>{
       const t90=msToHHMM(r.ms90),t30=msToHHMM(r.ms30),pm90=msToHHMM(r.pmMs90);
-      html+=`<tr><td>${escHtml(r.name)}</td><td><span class="space-tag">${escHtml(r.spaceName)}</span></td>
-        <td class="num ${t90?'time-90':'dash'}">${t90||'—'}</td>
-        <td class="num ${t30?'time-30':'dash'}">${t30||'—'}</td>
-        <td class="num ${pm90?'pm-90':'dash'}">${pm90||'—'}</td></tr>`;
+      html+=`<tr><td>${escHtml(r.name)}</td><td><span class="space-tag">${escHtml(r.spaceName)}</span></td><td class="num ${t90?'time-90':'dash'}">${t90||'—'}</td><td class="num ${t30?'time-30':'dash'}">${t30||'—'}</td><td class="num ${pm90?'pm-90':'dash'}">${pm90||'—'}</td></tr>`;
     });
-    html+=`<tr class="totals-row"><td colspan="2">Total (${sorted.length} lists)</td>
-      <td class="num time-90">${msToHHMM(totals.ms90)||'—'}</td>
-      <td class="num time-30">${msToHHMM(totals.ms30)||'—'}</td>
-      <td class="num pm-90">${msToHHMM(totals.pmMs90)||'—'}</td></tr></tbody></table>`;
+    html+=`<tr class="totals-row"><td colspan="2">Total (${sorted.length} lists)</td><td class="num time-90">${msToHHMM(totals.ms90)||'—'}</td><td class="num time-30">${msToHHMM(totals.ms30)||'—'}</td><td class="num pm-90">${msToHHMM(totals.pmMs90)||'—'}</td></tr></tbody></table>`;
     $('tableContainer').innerHTML=html;
     $('tableContainer').querySelectorAll('[data-col]').forEach(el=>{
       el.style.cursor='pointer';
-      el.addEventListener('click',()=>{ const col=el.dataset.col; if(_sortCol===col)_sortDir*=-1; else{_sortCol=col;_sortDir=(col==='name'||col==='spaceName')?1:-1;} drawTable(); });
+      el.addEventListener('click',()=>{const col=el.dataset.col;if(_sortCol===col)_sortDir*=-1;else{_sortCol=col;_sortDir=(col==='name'||col==='spaceName')?1:-1;}drawTable();});
     });
   }
 </script>
