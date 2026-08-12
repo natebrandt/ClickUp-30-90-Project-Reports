@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ClickUp Time Report</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0d0f14;
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+
+    header {
+      background: #161b27;
+      border-bottom: 1px solid #2a3348;
+      padding: 16px 28px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    header h1 { font-size: 18px; font-weight: 600; color: #f1f5f9; }
+    header span { font-size: 13px; color: #64748b; }
+
+    .layout { display: flex; min-height: calc(100vh - 57px); }
+
+    .sidebar {
+      width: 300px;
+      flex-shrink: 0;
+      background: #161b27;
+      border-right: 1px solid #2a3348;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .sidebar h2 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: #64748b; margin-bottom: 4px; }
+
+    label { font-size: 13px; color: #94a3b8; display: block; margin-bottom: 5px; }
+    input, textarea {
+      width: 100%;
+      background: #0d0f14;
+      border: 1px solid #2a3348;
+      border-radius: 6px;
+      color: #e2e8f0;
+      font-size: 13px;
+      padding: 8px 10px;
+      outline: none;
+      transition: border-color .15s;
+    }
+    input:focus, textarea:focus { border-color: #7c6af7; }
+    textarea { resize: vertical; min-height: 72px; font-family: monospace; }
+
+    .row-group { display: flex; flex-direction: column; gap: 6px; }
+
+    .btn {
+      cursor: pointer;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      padding: 9px 14px;
+      transition: opacity .15s, background .15s;
+    }
+    .btn:hover { opacity: .87; }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+    .btn-primary { background: #7c6af7; color: #fff; width: 100%; }
+    .btn-secondary { background: #1e2a3a; color: #94a3b8; border: 1px solid #2a3348; font-size: 12px; padding: 6px 10px; }
+
+    .detect-row { display: flex; gap: 6px; align-items: flex-end; }
+    .detect-row input { flex: 1; }
+
+    #status { font-size: 12px; color: #64748b; min-height: 18px; }
+    #status.error { color: #f87171; }
+    #status.success { color: #4ade80; }
+
+    .main { flex: 1; padding: 24px 28px; overflow-x: auto; }
+
+    .table-wrap { overflow-x: auto; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    thead tr { border-bottom: 2px solid #2a3348; }
+    thead th {
+      text-align: left;
+      padding: 10px 14px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: #64748b;
+      white-space: nowrap;
+    }
+    thead th.num { text-align: right; }
+
+    tbody tr { border-bottom: 1px solid #1e2535; transition: background .1s; }
+    tbody tr:hover { background: #161b27; }
+
+    td { padding: 10px 14px; vertical-align: middle; }
+    td.num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 13px;
+    }
+    td.time-90 { color: #7c6af7; }
+    td.time-30 { color: #38bdf8; }
+    td.pm-90   { color: #4ade80; }
+    td.dash    { color: #334155; }
+
+    .space-tag {
+      display: inline-block;
+      background: #1e2a3a;
+      border: 1px solid #2a3348;
+      border-radius: 4px;
+      font-size: 11px;
+      padding: 2px 7px;
+      color: #64748b;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+
+    .totals-row { background: #161b27; border-top: 2px solid #2a3348 !important; }
+    .totals-row td { font-weight: 600; color: #e2e8f0; }
+    .totals-row td.time-90 { color: #a78bfa; }
+    .totals-row td.time-30 { color: #7dd3fc; }
+    .totals-row td.pm-90  { color: #86efac; }
+
+    .empty { padding: 48px; text-align: center; color: #334155; font-size: 14px; }
+
+    .spinner {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid #2a3348;
+      border-top-color: #7c6af7;
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .meta-bar { display: flex; gap: 20px; margin-bottom: 18px; font-size: 12px; color: #475569; flex-wrap: wrap; }
+    .meta-bar strong { color: #94a3b8; }
+
+    .sort-btn { cursor: pointer; user-select: none; }
+    .sort-btn:hover { color: #e2e8f0; }
+
+    .space-picker-list { display: flex; flex-direction: column; gap: 4px; }
+    .space-picker-item {
+      display: flex; align-items: center; gap: 8px;
+      background: #0d0f14; border: 1px solid #2a3348; border-radius: 5px;
+      padding: 7px 10px; cursor: pointer; font-size: 12px;
+      transition: border-color .1s;
+    }
+    .space-picker-item:hover { border-color: #7c6af7; }
+    .space-picker-item input[type=checkbox] { accent-color: #7c6af7; cursor: pointer; }
+    .space-picker-item .sp-name { flex: 1; color: #e2e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .space-picker-item .sp-id { font-family: monospace; color: #475569; font-size: 11px; }
+    .space-picker-apply { margin-top: 6px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>ClickUp Time Report</h1>
+  <span>90-day &amp; 30-day totals by list</span>
+</header>
+
+<div class="layout">
+  <aside class="sidebar">
+    <div><h2>Configuration</h2></div>
+
+    <div class="row-group">
+      <label for="teamId">Workspace (Team) ID</label>
+      <div class="detect-row">
+        <input type="text" id="teamId" placeholder="e.g. 1230709" />
+        <button class="btn btn-secondary" id="detectBtn">Detect</button>
+      </div>
+    </div>
+
+    <div class="row-group">
+      <label for="spaceIds">Space IDs <span style="color:#475569">(one per line)</span></label>
+      <textarea id="spaceIds" placeholder="90123456&#10;90123457"></textarea>
+      <button class="btn btn-secondary" id="browseBtn" style="margin-top:2px">Browse Spaces…</button>
+    </div>
+    <div id="spacePicker" style="display:none"></div>
+
+    <div class="row-group">
+      <label for="pmGroupName">PM Group Name</label>
+      <input type="text" id="pmGroupName" value="2025_PM" placeholder="2025_PM" />
+    </div>
+
+    <button class="btn btn-primary" id="runBtn">Run Report</button>
+    <div id="status"></div>
+
+    <div style="font-size:11px; color:#334155; line-height:1.6; margin-top:auto">
+      Settings saved in localStorage. The ClickUp API token is stored server-side in Vercel — it never reaches the browser.
+    </div>
+  </aside>
+
+  <main class="main">
+    <div id="metaBar" class="meta-bar" style="display:none"></div>
+    <div class="table-wrap">
+      <div id="tableContainer">
+        <div class="empty">Configure settings and click <strong>Run Report</strong> to load data.</div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+  const $ = id => document.getElementById(id);
+
+  // ── Persist non-secret settings ───────────────────────────────────────────
+  const KEYS = ['teamId', 'spaceIds', 'pmGroupName'];
+  KEYS.forEach(k => {
+    const el = $(k);
+    const saved = localStorage.getItem('cu_' + k);
+    if (saved) el.value = saved;
+    el.addEventListener('input', () => localStorage.setItem('cu_' + k, el.value));
+  });
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  function msToHHMM(ms) {
+    if (!ms || ms <= 0) return null;
+    const totalMin = Math.floor(Math.abs(ms) / 60000);
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    return `${h}:${String(m).padStart(2, '0')}`;
+  }
+
+  function setStatus(msg, type = '') {
+    const el = $('status');
+    el.className = type;
+    el.innerHTML = msg;
+  }
+
+  // All ClickUp API calls go through the Vercel serverless proxy.
+  async function cuFetch(path) {
+    const res = await fetch(`/api/clickup${path}`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(`API error ${res.status}: ${body.err || body.error || res.statusText}`);
+    }
+    return res.json();
+  }
+
+  // ── Auto-detect workspace ID ──────────────────────────────────────────────
+  $('detectBtn').addEventListener('click', async () => {
+    $('detectBtn').disabled = true;
+    setStatus('<span class="spinner"></span>Detecting…');
+    try {
+      const data = await cuFetch('/team');
+      const teams = data.teams || [];
+      if (!teams.length) throw new Error('No workspaces found for this token.');
+      if (teams.length === 1) {
+        $('teamId').value = teams[0].id;
+        localStorage.setItem('cu_teamId', teams[0].id);
+        setStatus(`✓ Found workspace: <strong>${teams[0].name}</strong>`, 'success');
+      } else {
+        const names = teams.map(t => `${t.name} (${t.id})`).join(', ');
+        setStatus(`Multiple workspaces — enter ID manually: ${names}`);
+      }
+    } catch (e) {
+      setStatus(e.message, 'error');
+    } finally {
+      $('detectBtn').disabled = false;
+    }
+  });
+
+  // ── Browse spaces ─────────────────────────────────────────────────────────
+  $('browseBtn').addEventListener('click', async () => {
+    const teamId = $('teamId').value.trim();
+    if (!teamId) { setStatus('Enter your Workspace ID first.', 'error'); return; }
+    $('browseBtn').disabled = true;
+    setStatus('<span class="spinner"></span>Loading spaces…');
+    try {
+      const data   = await cuFetch(`/team/${teamId}/space?archived=false`);
+      const spaces = data.spaces || [];
+      if (!spaces.length) throw new Error('No spaces found.');
+
+      const currentIds = new Set($('spaceIds').value.split(/[\n,]+/).map(s => s.trim()).filter(Boolean));
+      let html = '<div class="space-picker-list">';
+      spaces.forEach(s => {
+        const checked = currentIds.has(String(s.id)) ? 'checked' : '';
+        html += `
+          <label class="space-picker-item">
+            <input type="checkbox" value="${s.id}" ${checked} />
+            <span class="sp-name">${escHtml(s.name)}</span>
+            <span class="sp-id">${s.id}</span>
+          </label>`;
+      });
+      html += '</div><button class="btn btn-secondary space-picker-apply" id="applySpaces">Apply selection</button>';
+
+      const picker = $('spacePicker');
+      picker.innerHTML = html;
+      picker.style.display = 'block';
+      setStatus('');
+
+      $('applySpaces').addEventListener('click', () => {
+        const ids = [...picker.querySelectorAll('input[type=checkbox]:checked')].map(cb => cb.value);
+        $('spaceIds').value = ids.join('\n');
+        localStorage.setItem('cu_spaceIds', $('spaceIds').value);
+        picker.style.display = 'none';
+        setStatus(`✓ ${ids.length} space(s) selected`, 'success');
+      });
+    } catch (e) {
+      setStatus(e.message, 'error');
+    } finally {
+      $('browseBtn').disabled = false;
+    }
+  });
+
+  // ── Report ────────────────────────────────────────────────────────────────
+  $('runBtn').addEventListener('click', runReport);
+
+  async function runReport() {
+    const teamId   = $('teamId').value.trim();
+    const spaceRaw = $('spaceIds').value.trim();
+    const pmGroup  = $('pmGroupName').value.trim();
+
+    if (!teamId)   { setStatus('Workspace ID is required.', 'error'); return; }
+    if (!spaceRaw) { setStatus('At least one Space ID is required.', 'error'); return; }
+
+    const spaceIds = spaceRaw.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+
+    $('runBtn').disabled = true;
+    $('metaBar').style.display = 'none';
+    $('tableContainer').innerHTML = '<div class="empty"><span class="spinner"></span>Loading…</div>';
+    setStatus('<span class="spinner"></span>Fetching data…');
+
+    try {
+      const now     = Date.now();
+      const start90 = now - 90 * 24 * 60 * 60 * 1000;
+      const start30 = now - 30 * 24 * 60 * 60 * 1000;
+
+      setStatus('<span class="spinner"></span>Loading members, lists, and PM group…');
+      const [listMap, allMemberIds, pmUserIds] = await Promise.all([
+        fetchAllLists(spaceIds),
+        fetchAllMemberIds(teamId),
+        fetchPMUserIds(teamId, pmGroup),
+      ]);
+
+      const listCount = Object.keys(listMap).length;
+      if (!listCount) throw new Error('No lists found in the configured spaces. Check your Space IDs.');
+      setStatus(`<span class="spinner"></span>Found ${listCount} lists, ${allMemberIds.length} members — fetching time entries…`);
+
+      const entries90 = await fetchTimeEntries(teamId, allMemberIds, start90, now);
+      const entries30 = entries90.filter(e => Number(e.start) >= start30);
+
+      const rows = aggregateByList(entries90, entries30, listMap, pmUserIds);
+      renderTable(rows, pmGroup);
+      renderMeta(now, start90, start30, entries90.length, pmUserIds.length, allMemberIds.length);
+      setStatus(`✓ Report generated — ${rows.length} lists`, 'success');
+    } catch (e) {
+      $('tableContainer').innerHTML = `<div class="empty" style="color:#f87171">${escHtml(e.message)}</div>`;
+      setStatus(e.message, 'error');
+    } finally {
+      $('runBtn').disabled = false;
+    }
+  }
+
+  async function fetchPMUserIds(teamId, groupName) {
+    if (!groupName) return [];
+    const data = await cuFetch(`/group?team_id=${teamId}`);
+    const groups = data.groups || [];
+    const match = groups.find(g =>
+      g.name === groupName ||
+      (g.alias && g.alias.replace(/^@/, '') === groupName.replace(/^@/, ''))
+    );
+    if (!match) return [];
+    return (match.members || []).map(m => String(m.user?.id ?? m.id));
+  }
+
+  async function fetchAllMemberIds(teamId) {
+    const data = await cuFetch('/team');
+    const team = (data.teams || []).find(t => String(t.id) === String(teamId));
+    if (!team) throw new Error(`Workspace ${teamId} not found.`);
+    return (team.members || []).map(m => String(m.user?.id ?? m.id)).filter(Boolean);
+  }
+
+  async function fetchAllLists(spaceIds) {
+    const listMap = {};
+    await Promise.all(spaceIds.map(async spaceId => {
+      let spaceName = spaceId;
+      try {
+        const s = await cuFetch(`/space/${spaceId}`);
+        spaceName = s.name || spaceId;
+      } catch (_) {}
+
+      const fl = await cuFetch(`/space/${spaceId}/list?archived=false`);
+      (fl.lists || []).forEach(l => { listMap[String(l.id)] = { name: l.name, spaceName }; });
+
+      const fd = await cuFetch(`/space/${spaceId}/folder?archived=false`);
+      await Promise.all((fd.folders || []).map(async folder => {
+        const fl2 = await cuFetch(`/folder/${folder.id}/list?archived=false`);
+        (fl2.lists || []).forEach(l => { listMap[String(l.id)] = { name: l.name, spaceName }; });
+      }));
+    }));
+    return listMap;
+  }
+
+  // Single call with all member IDs; ClickUp accepts a comma-separated assignee list.
+  async function fetchTimeEntries(teamId, memberIds, startMs, endMs) {
+    const allEntries = [];
+    let page = 0;
+    while (true) {
+      const params = new URLSearchParams({
+        start_date:             String(Math.floor(startMs)),
+        end_date:               String(Math.floor(endMs)),
+        include_location_names: 'true',
+        assignee:               memberIds.join(','),
+        page:                   String(page),
+      });
+      const data = await cuFetch(`/team/${teamId}/time_entries?${params}`);
+      const entries = data.data || [];
+      allEntries.push(...entries);
+      if (entries.length < 50) break;
+      page++;
+      if (page > 200) break;
+    }
+    return allEntries;
+  }
+
+  function aggregateByList(entries90, entries30, listMap, pmUserIds) {
+    const pmSet = new Set(pmUserIds);
+    const map = Object.fromEntries(
+      Object.entries(listMap).map(([id, v]) => [id, { name: v.name, spaceName: v.spaceName, ms90: 0, ms30: 0, pmMs90: 0 }])
+    );
+
+    entries90.forEach(e => {
+      const loc = e.task_location;
+      if (!loc) return;
+      const listId = String(loc.list_id);
+      if (!listId || listId === 'null' || !map[listId]) return;
+      const dur = Number(e.duration) || 0;
+      map[listId].ms90 += dur;
+      if (pmSet.has(String(e.user?.id))) map[listId].pmMs90 += dur;
+    });
+
+    entries30.forEach(e => {
+      const loc = e.task_location;
+      if (!loc) return;
+      const listId = String(loc.list_id);
+      if (!listId || listId === 'null' || !map[listId]) return;
+      map[listId].ms30 += (Number(e.duration) || 0);
+    });
+
+    return Object.entries(map)
+      .map(([id, v]) => ({ id, ...v }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  // ── Rendering ─────────────────────────────────────────────────────────────
+  let _rows = [], _sortCol = 'name', _sortDir = 1, _pmGroupName = '';
+
+  function renderTable(rows, pmGroupName) {
+    _rows = rows; _sortCol = 'name'; _sortDir = 1; _pmGroupName = pmGroupName;
+    drawTable();
+  }
+
+  function drawTable() {
+    const sorted = [..._rows].sort((a, b) => {
+      const av = a[_sortCol], bv = b[_sortCol];
+      return typeof av === 'string' ? _sortDir * av.localeCompare(bv) : _sortDir * (av - bv);
+    });
+
+    const totals = sorted.reduce((acc, r) => {
+      acc.ms90 += r.ms90; acc.ms30 += r.ms30; acc.pmMs90 += r.pmMs90; return acc;
+    }, { ms90: 0, ms30: 0, pmMs90: 0 });
+
+    const sh = (col, label) => {
+      const arrow = _sortCol === col ? (_sortDir === 1 ? ' ↑' : ' ↓') : '';
+      return `<th class="num sort-btn" data-col="${col}">${label}${arrow}</th>`;
+    };
+
+    let html = `<table><thead><tr>
+      <th class="sort-btn" data-col="name">List Name</th>
+      <th class="sort-btn" data-col="spaceName">Space</th>
+      ${sh('ms90', 'Time // 90 Days')}
+      ${sh('ms30', 'Time // 30 Days')}
+      ${sh('pmMs90', `PM Time // 90 Days${_pmGroupName ? ' (' + escHtml(_pmGroupName) + ')' : ''}`)}
+    </tr></thead><tbody>`;
+
+    sorted.forEach(r => {
+      const t90 = msToHHMM(r.ms90), t30 = msToHHMM(r.ms30), pm90 = msToHHMM(r.pmMs90);
+      html += `<tr>
+        <td>${escHtml(r.name)}</td>
+        <td><span class="space-tag">${escHtml(r.spaceName)}</span></td>
+        <td class="num ${t90  ? 'time-90' : 'dash'}">${t90  || '—'}</td>
+        <td class="num ${t30  ? 'time-30' : 'dash'}">${t30  || '—'}</td>
+        <td class="num ${pm90 ? 'pm-90'   : 'dash'}">${pm90 || '—'}</td>
+      </tr>`;
+    });
+
+    const tt90 = msToHHMM(totals.ms90) || '—';
+    const tt30 = msToHHMM(totals.ms30) || '—';
+    const tpm  = msToHHMM(totals.pmMs90) || '—';
+
+    html += `<tr class="totals-row">
+      <td colspan="2">Total (${sorted.length} lists)</td>
+      <td class="num time-90">${tt90}</td>
+      <td class="num time-30">${tt30}</td>
+      <td class="num pm-90">${tpm}</td>
+    </tr></tbody></table>`;
+
+    $('tableContainer').innerHTML = html;
+    $('tableContainer').querySelectorAll('[data-col]').forEach(el => {
+      el.style.cursor = 'pointer';
+      el.addEventListener('click', () => {
+        const col = el.dataset.col;
+        if (_sortCol === col) _sortDir *= -1;
+        else { _sortCol = col; _sortDir = (col === 'name' || col === 'spaceName') ? 1 : -1; }
+        drawTable();
+      });
+    });
+  }
+
+  function renderMeta(now, start90, start30, totalEntries, pmCount, memberCount) {
+    const fmt = ms => new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    $('metaBar').style.display = 'flex';
+    $('metaBar').innerHTML = `
+      <span><strong>90-day window:</strong> ${fmt(start90)} – ${fmt(now)}</span>
+      <span><strong>30-day window:</strong> ${fmt(start30)} – ${fmt(now)}</span>
+      <span><strong>Entries fetched:</strong> ${totalEntries.toLocaleString()}</span>
+      <span><strong>Members:</strong> ${memberCount} &nbsp;|&nbsp; <strong>PM members:</strong> ${pmCount}</span>`;
+  }
+
+  function escHtml(s) {
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+</script>
+</body>
+</html>
