@@ -225,20 +225,24 @@
       log(`✓ ${listCount} lists found across ${spaceIds.length} space(s)`,'ok');
       log(`✓ ${allMemberIds.length} workspace members  |  ${pmUserIds.length} PM members`,'ok');
       log(`Fetching time entries for ${allMemberIds.length} members (90-day window)…`);
+      log(`  Sending: start=${new Date(start90).toLocaleDateString()} end=${new Date(now).toLocaleDateString()} (${start90} – ${now})`,'dim');
       setStatus(`<span class="spinner"></span>Fetching time entries…`);
 
       const entries90=await fetchTimeEntries(teamId,allMemberIds,start90,now);
-      const entries30=entries90.filter(e=>Number(e.start)>=start30);
-      log(`✓ ${entries90.length.toLocaleString()} unique entries fetched  |  ${entries30.length.toLocaleString()} in last 30 days`,'ok');
+      // Client-side safety filter — guards against the API returning all-time data
+      const filtered90=entries90.filter(e=>{ const s=Number(e.start); return s>=start90&&s<=now; });
+      if (filtered90.length!==entries90.length) log(`  ⚠ Date filter applied client-side: ${entries90.length.toLocaleString()} → ${filtered90.length.toLocaleString()} entries`,'warn');
+      const entries30=filtered90.filter(e=>Number(e.start)>=start30);
+      log(`✓ ${filtered90.length.toLocaleString()} entries in 90-day window  |  ${entries30.length.toLocaleString()} in last 30 days`,'ok');
       log('Aggregating by list…');
-      const lists=aggregateByList(entries90,entries30,listMap,pmUserIds);
+      const lists=aggregateByList(filtered90,entries30,listMap,pmUserIds);
       log(`✓ Aggregation complete — ${lists.length} lists`,'ok');
 
       const report={
         generatedAt:new Date().toISOString(),
         cached:true,
         windows:{start90,start30,end:now},
-        meta:{totalEntries:entries90.length, memberCount:allMemberIds.length, pmMemberCount:pmUserIds.length},
+        meta:{totalEntries:filtered90.length, memberCount:allMemberIds.length, pmMemberCount:pmUserIds.length},
         lists
       };
 
@@ -298,20 +302,24 @@
   }
 
   async function fetchTimeEntries(teamId,memberIds,startMs,endMs) {
-    const all=[]; let page=0;
+    const seen=new Set();
+    const all=[];
+    let page=0;
     while(true) {
       const params=new URLSearchParams({start_date:String(Math.floor(startMs)),end_date:String(Math.floor(endMs)),include_location_names:'true',assignee:memberIds.join(','),page:String(page)});
       const data=await cuFetch(`/team/${teamId}/time_entries?${params}`);
       const entries=data.data||[];
-      all.push(...entries);
-      if (page===0||page%5===0) log(`  Page ${page+1} — ${all.length.toLocaleString()} entries so far…`,'dim');
-      if (entries.length<50) break;
+      // Count genuinely new entries on this page to detect when pagination stops yielding new data
+      let newCount=0;
+      for (const e of entries) {
+        if (e.id&&!seen.has(e.id)) { seen.add(e.id); all.push(e); newCount++; }
+      }
+      log(`  Page ${page+1}: ${entries.length} returned, ${newCount} new (${all.length.toLocaleString()} total unique)`,'dim');
+      // Stop if no new entries or the page was partial (end of data)
+      if (newCount===0||entries.length<50) break;
       page++; if (page>200) break;
     }
-    const seen=new Set();
-    const deduped=all.filter(e=>e.id&&!seen.has(e.id)&&seen.add(e.id));
-    if (all.length!==deduped.length) log(`  Removed ${(all.length-deduped.length).toLocaleString()} duplicate entries`,'dim');
-    return deduped;
+    return all;
   }
 
   function aggregateByList(entries90,entries30,listMap,pmUserIds) {
